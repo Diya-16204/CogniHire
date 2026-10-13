@@ -1,0 +1,34 @@
+server:
+  port: 8080
+  error:
+    include-message: never
+spring:
+  application:
+    name: cognihire-api
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/cognihire}
+    username: ${SPRING_DATASOURCE_USERNAME:cognihire}
+    password: ${SPRING_DATASOURCE_PASSWORD:change-me}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+app:
+  jwt-secret: ${JWT_SECRET:}
+  jwt-expiration-minutes: ${JWT_EXPIRATION_MINUTES:60}
+  frontend-origin: ${FRONTEND_ORIGIN:http://localhost:5173}
+judge0:
+  base-url: ${JUDGE0_BASE_URL:}
+  api-key: ${JUDGE0_API_KEY:}
+  language-ids: ${JUDGE0_LANGUAGE_IDS:}
+llm:
+  base-url: ${LLM_BASE_URL:}
+  api-key: ${LLM_API_KEY:}
+  model: ${LLM_MODEL:}
