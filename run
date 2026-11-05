@@ -53,3 +53,12 @@ cd D:\ProjectReal\CogniHire-main
 docker compose -f docker-compose.piston.yml down
 docker compose up -d cognihire-redis cognihire-piston
 docker compose ps
+
+# Navigate to your project folder
+cd D:\ProjectReal\CogniHire-main
+# Stage all modified files
+D:\Git\cmd\git.exe add .
+# Commit your changes (replace the message inside quotes with what you updated)
+D:\Git\cmd\git.exe commit -m "Update: updated UI dark theme and live monitoring"
+# Push updates to GitHub
+D:\Git\cmd\git.exe push
