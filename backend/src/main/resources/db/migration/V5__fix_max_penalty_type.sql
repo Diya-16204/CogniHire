@@ -1,0 +1,3 @@
+ALTER TABLE assessments
+  ALTER COLUMN max_penalty TYPE DOUBLE PRECISION
+  USING max_penalty::DOUBLE PRECISION;

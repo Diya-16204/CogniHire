@@ -1,0 +1,71 @@
+server:
+  port: ${PORT:8080}
+  error:
+    include-message: never
+spring:
+  data:
+    redis:
+      url: ${SPRING_DATA_REDIS_URL:redis://localhost:6379}
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: cognihire-interview
+      auto-offset-reset: earliest
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        max.block.ms: 500
+    listener:
+      auto-startup: ${INTERVIEW_KAFKA_ENABLED:false}
+  config:
+    import: optional:file:../.env[.properties]
+  application:
+    name: cognihire-api
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
+  datasource:
+    url: "${SPRING_DATASOURCE_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:cognihire}}"
+    username: ${SPRING_DATASOURCE_USERNAME:${DB_USER:cognihire}}
+    password: ${SPRING_DATASOURCE_PASSWORD:${DB_PASSWORD:change-me}}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 8
+management:
+  health:
+    redis:
+      enabled: false
+    kafka:
+      enabled: false
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+app:
+  jwt-secret: ${JWT_SECRET:}
+  jwt-expiration-minutes: ${JWT_EXPIRATION_MINUTES:60}
+  frontend-origin: ${FRONTEND_ORIGIN:http://localhost:5173,http://localhost:5174,http://localhost:5175,http://localhost:3000}
+judge0:
+  base-url: ${JUDGE0_BASE_URL:http://localhost:2000/api/v2}
+  api-key: ${JUDGE0_API_KEY:}
+  rapidapi-host: ${JUDGE0_RAPIDAPI_HOST:judge0-ce.p.rapidapi.com}
+  piston-python-version: ${PISTON_PYTHON_VERSION:3.10.0}
+piston:
+  url: ${PISTON_URL:http://localhost:2000}
+  enabled: ${PISTON_ENABLED:true}
+llm:
+  base-url: ${LLM_BASE_URL:}
+  api-key: ${LLM_API_KEY:}
+  model: ${LLM_MODEL:}
+interview:
+  kafka-enabled: ${INTERVIEW_KAFKA_ENABLED:false}
+  kafka-topic: candidate-interview-answers

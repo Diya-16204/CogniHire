@@ -1,0 +1,10 @@
+.git
+.env
+.env.*
+!.env.example
+.idea
+.piston-data
+frontend/node_modules
+frontend/dist
+backend/target
+*.log

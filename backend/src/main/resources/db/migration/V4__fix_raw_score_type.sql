@@ -1,0 +1,3 @@
+ALTER TABLE assessment_attempts
+  ALTER COLUMN raw_score TYPE DOUBLE PRECISION
+  USING raw_score::DOUBLE PRECISION;

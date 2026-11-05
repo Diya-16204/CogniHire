@@ -1,0 +1,55 @@
+Project start karne ke steps
+1. PostgreSQL service check karo
+
+Windows Start mein Services kholo aur postgresql-x64-16 service Running honi chahiye.
+
+
+2. Backend start karo — PowerShell 1
+cd D:\ProjectReal\CogniHire-main\backend
+
+Get-Content ..\.env | Where-Object { $_ -match '^[A-Za-z_][A-Za-z0-9_]*=' } | ForEach-Object {
+  $key, $value = $_.Split('=', 2)
+  [Environment]::SetEnvironmentVariable($key, $value, 'Process')
+}
+
+.\mvnw.cmd spring-boot:run
+Started CogniHireApplication dikhne par backend chal raha hai. Is terminal ko khula rehne do.
+
+3. Frontend start karo — PowerShell 2
+cd D:\ProjectReal\CogniHire-main\frontend
+npm run dev
+Agar pehli baar setup hai ya frontend dependencies install nahi hain, pehle npm install chalao.
+
+4. Browser mein kholo
+
+Frontend terminal mein diya URL kholo, usually http://localhost:5173. Pehli baar Create account karke sign in karo.
+
+# $bytes = New-Object byte[] 48
+# $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+# $rng.GetBytes($bytes)
+#[Convert]::ToBase64String($bytes)
+
+
+
+
+
+
+#powershell -Command "$b = New-Object byte[] 48; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)"
+
+//PowerShell as Administrator
+Start-Service postgresql-x64-16
+Test-NetConnection localhost -Port 5432
+
+cd D:\ProjectReal\CogniHire-main
+docker compose -f docker-compose.piston.yml up -d
+
+cd D:\ProjectReal\CogniHire-main\backend
+.\mvnw.cmd spring-boot:run
+
+cd D:\ProjectReal\CogniHire-main\frontend
+npm run dev
+
+cd D:\ProjectReal\CogniHire-main
+docker compose -f docker-compose.piston.yml down
+docker compose up -d cognihire-redis cognihire-piston
+docker compose ps

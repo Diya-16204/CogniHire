@@ -1,0 +1,2 @@
+ALTER TABLE users
+  ADD COLUMN account_claimed BOOLEAN NOT NULL DEFAULT TRUE;
