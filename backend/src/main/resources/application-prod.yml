@@ -1,0 +1,51 @@
+server:
+  port: ${PORT:8080}
+  forward-headers-strategy: framework
+
+spring:
+  datasource:
+    # Set this to Neon's JDBC URL and retain ?sslmode=require.
+    url: ${SPRING_DATASOURCE_URL:}
+    username: ${SPRING_DATASOURCE_USERNAME:}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:5}
+      minimum-idle: 0
+      connection-timeout: 30000
+      idle-timeout: 300000
+      max-lifetime: 900000
+  data:
+    redis:
+      host: ${UPSTASH_REDIS_HOST:${REDIS_HOST:localhost}}
+      port: ${UPSTASH_REDIS_PORT:${REDIS_PORT:6379}}
+      password: ${UPSTASH_REDIS_PASSWORD:${REDIS_PASSWORD:}}
+      ssl:
+        enabled: true
+      connect-timeout: 2s
+      timeout: 2s
+  flyway:
+    enabled: true
+
+app:
+  frontend-origin: ${CORS_ALLOWED_ORIGINS:${FRONTEND_ORIGIN:http://localhost:5173}}
+
+judge0:
+  # Disable Judge0 in this profile; the code provider uses local Piston first,
+  # then the configured public Piston endpoint if local execution is unavailable.
+  base-url: ${JUDGE0_BASE_URL:}
+  api-key: ${JUDGE0_API_KEY:}
+
+piston:
+  enabled: ${PISTON_ENABLED:true}
+  url: ${PISTON_LOCAL_URL:http://localhost:2000}
+  public-url: ${PISTON_PUBLIC_URL:https://emkc.org/api/v2/piston}
+  api-key: ${PISTON_API_KEY:}
+
+interview:
+  kafka-enabled: ${INTERVIEW_KAFKA_ENABLED:false}
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true

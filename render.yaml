@@ -1,10 +1,4 @@
 services:
-  - type: keyvalue
-    name: cognihire-redis
-    plan: free
-    region: singapore
-    ipAllowList: []
-
   - type: web
     name: cognihire-api
     runtime: docker
@@ -14,67 +8,33 @@ services:
     dockerContext: .
     healthCheckPath: /actuator/health
     envVars:
-      - key: DB_HOST
-        fromDatabase:
-          name: cognihire-db
-          property: host
-      - key: DB_PORT
-        fromDatabase:
-          name: cognihire-db
-          property: port
-      - key: DB_NAME
-        fromDatabase:
-          name: cognihire-db
-          property: database
-      - key: DB_USER
-        fromDatabase:
-          name: cognihire-db
-          property: user
-      - key: DB_PASSWORD
-        fromDatabase:
-          name: cognihire-db
-          property: password
-      - key: SPRING_DATA_REDIS_URL
-        fromService:
-          type: keyvalue
-          name: cognihire-redis
-          property: connectionString
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+      - key: SPRING_DATASOURCE_URL
+        sync: false
+      - key: SPRING_DATASOURCE_USERNAME
+        sync: false
+      - key: SPRING_DATASOURCE_PASSWORD
+        sync: false
+      - key: UPSTASH_REDIS_HOST
+        sync: false
+      - key: UPSTASH_REDIS_PORT
+        value: "6379"
+      - key: UPSTASH_REDIS_PASSWORD
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
       - key: JWT_SECRET
         generateValue: true
-      - key: FRONTEND_ORIGIN
-        fromService:
-          type: web
-          name: cognihire-web
-          envVarKey: RENDER_EXTERNAL_URL
       - key: INTERVIEW_KAFKA_ENABLED
         value: "false"
+      - key: JUDGE0_BASE_URL
+        value: ""
       - key: PISTON_ENABLED
-        value: "false"
-
-  - type: web
-    name: cognihire-web
-    runtime: static
-    region: singapore
-    rootDir: frontend
-    buildCommand: npm ci && npm run build
-    staticPublishPath: dist
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-    envVars:
-      - key: NODE_VERSION
-        value: 22.12.0
-      - key: VITE_API_URL
-        fromService:
-          type: web
-          name: cognihire-api
-          envVarKey: RENDER_EXTERNAL_URL
-
-databases:
-  - name: cognihire-db
-    databaseName: cognihire
-    user: cognihire
-    plan: free
-    region: singapore
-    ipAllowList: []
+        value: "true"
+      - key: PISTON_LOCAL_URL
+        value: http://localhost:2000
+      - key: PISTON_PUBLIC_URL
+        value: https://emkc.org/api/v2/piston
+      - key: PISTON_API_KEY
+        sync: false

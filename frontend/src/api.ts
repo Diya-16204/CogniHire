@@ -1,11 +1,47 @@
 import axios from 'axios'
 
+declare module 'axios' { interface AxiosRequestConfig { __coldStartRetry?: boolean } }
+
 const configuredApiUrl = (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL)?.trim().replace(/\/+$/, '')
 const apiBaseUrl = configuredApiUrl
   ? (configuredApiUrl.endsWith('/api/v1') ? configuredApiUrl : `${configuredApiUrl}/api/v1`)
   : 'http://localhost:8080/api/v1'
 
-export const api = axios.create({ baseURL: apiBaseUrl, timeout: 20000 })
+const configuredWsUrl = import.meta.env.VITE_WS_BASE_URL?.trim().replace(/\/+$/, '')
+export const wsBaseUrl = configuredWsUrl
+  ? configuredWsUrl.replace(/^https:/i, 'wss:').replace(/^http:/i, 'ws:')
+  : `${apiBaseUrl.startsWith('https:') ? 'wss:' : 'ws:'}//${new URL(apiBaseUrl).host}/ws/interview`
+
+export const api = axios.create({ baseURL: apiBaseUrl, timeout: 90000 })
+
+// Render's free instance may take a while to wake. Retry safe reads and login
+// once on transient network/gateway failures; never replay assessment writes.
+api.interceptors.response.use(undefined, async (error) => {
+  const config = error.config
+  const method = (config?.method ?? 'get').toLowerCase()
+  const isLogin = method === 'post' && (config?.url ?? '').includes('/auth/login')
+  const transient = !error.response || [502, 503, 504].includes(error.response.status)
+  if (config && (method === 'get' || isLogin) && transient && !config.__coldStartRetry) {
+    config.__coldStartRetry = true
+    await new Promise(resolve => window.setTimeout(resolve, 1800))
+    return api.request(config)
+  }
+  return Promise.reject(error)
+})
+
+export type RecruiterFollowUp = {
+  id: string
+  question: string
+  answer: string | null
+  createdAt: string
+  answeredAt: string | null
+}
+
+export async function fetchRecruiterFollowUps(attemptId: string) {
+  const { data } = await api.get<RecruiterFollowUp[]>(`/candidate/attempts/${attemptId}/interventions`)
+  return data
+}
+
 api.interceptors.request.use((config) => {
   const token = sessionStorage.getItem('cognihire-token')
   if (token) config.headers.Authorization = `Bearer ${token}`
@@ -42,7 +78,7 @@ export function errorMessage(error: unknown) {
       return `Not found (404): ${method} ${url}. Restart the backend if its source was recently updated.`
     }
     if (backendMessage) return backendMessage
-    if (!error.response) return 'Cannot reach the CogniHire backend. Make sure it is running on localhost:8080 and retry.'
+    if (!error.response) return 'Cannot reach the CogniHire backend. It may be starting after an idle period; wait briefly and retry.'
     return error.message
   }
   return 'Something went wrong. Please try again.'

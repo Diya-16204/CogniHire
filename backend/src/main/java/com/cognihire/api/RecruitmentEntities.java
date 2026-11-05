@@ -104,6 +104,23 @@ interface RoundTwoInterviewTurnRepository extends org.springframework.data.jpa.r
   boolean existsByAttemptIdAndTurnIndex(UUID attemptId, int turnIndex);
 }
 
+@Getter @Setter @NoArgsConstructor(access = AccessLevel.PROTECTED)
+@Entity @Table(name = "recruiter_interventions")
+class RecruiterIntervention {
+  @Id UUID id = UUID.randomUUID();
+  @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "attempt_id", nullable = false) AssessmentAttempt attempt;
+  @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "recruiter_id", nullable = false) UserAccount recruiter;
+  @Column(nullable = false, columnDefinition = "text") String question;
+  @Column(nullable = false, columnDefinition = "text") String answer = "";
+  @Column(name = "created_at", nullable = false) Instant createdAt = Instant.now();
+  @Column(name = "answered_at") Instant answeredAt;
+}
+
+interface RecruiterInterventionRepository extends org.springframework.data.jpa.repository.JpaRepository<RecruiterIntervention, UUID> {
+  java.util.List<RecruiterIntervention> findByAttemptIdOrderByCreatedAtAsc(UUID attemptId);
+  java.util.Optional<RecruiterIntervention> findByIdAndAttemptId(UUID id, UUID attemptId);
+}
+
 interface AttemptRepository extends org.springframework.data.jpa.repository.JpaRepository<Attempt, UUID> {
   java.util.Optional<Attempt> findByAssessmentIdAndCandidateEmail(UUID assessmentId, String candidateEmail);
   java.util.List<Attempt> findByAssessmentIdOrderByStartedAtDesc(UUID assessmentId);

@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import Editor from '@monaco-editor/react'
-import { Client } from '@stomp/stompjs'
+import { Client, ReconnectionTimeMode } from '@stomp/stompjs'
 import { ArrowLeft, ArrowRight, Check, Clock3, Code2, ShieldCheck } from 'lucide-react'
-import { api, errorMessage } from './api'
+import { api, errorMessage, wsBaseUrl } from './api'
 import AIInterviewPanel, { type AIInterviewTurn } from './AIInterviewPanel'
 import LiveVideoCall from './LiveVideoCall'
 import CandidateProctorHud from './CandidateProctorHud'
@@ -80,9 +80,7 @@ export default function CandidateWorkspace() {
     if (!attempt) return
     const token = sessionStorage.getItem('cognihire-token')
     if (!token) { setRoundTwoInterview(prev => prev ? { ...prev, status: 'error', message: 'Your login session is missing. Sign in again.' } : prev); return }
-    const base = new URL(api.defaults.baseURL ?? 'http://localhost:8080/api/v1')
-    const brokerURL = `${base.protocol === 'https:' ? 'wss:' : 'ws:'}//${base.host}/ws/interview`
-    const client = new Client({ brokerURL, connectHeaders: { Authorization: `Bearer ${token}` }, reconnectDelay: 2500, debug: () => {} })
+      const client = new Client({ brokerURL: wsBaseUrl, connectHeaders: { Authorization: `Bearer ${token}` }, reconnectDelay: 3000, maxReconnectDelay: 15000, reconnectTimeMode: ReconnectionTimeMode.EXPONENTIAL, heartbeatIncoming: 10000, heartbeatOutgoing: 10000, debug: () => {} })
     stompClient.current = client
     client.onConnect = () => {
       setCallSocketReady(true)
@@ -120,8 +118,8 @@ export default function CandidateWorkspace() {
       if (roundTwoInterviewOpen) client.publish({ destination: '/app/interview.start', body: JSON.stringify({ attemptId: attempt.id }) })
     }
     client.onStompError = frame => setRoundTwoInterview(prev => prev ? { ...prev, status: 'error', message: frame.headers.message || 'Interview connection was rejected.' } : prev)
-    client.onWebSocketError = () => setRoundTwoInterview(prev => prev ? { ...prev, status: 'error', message: 'Cannot connect to the interview socket. Check that the backend is running.' } : prev)
-    client.onWebSocketClose = () => setCallSocketReady(false)
+    client.onWebSocketError = () => { setCallSocketReady(false); setRoundTwoInterview(prev => prev && prev.status !== 'complete' ? { ...prev, status: 'connecting', message: 'Connection interrupted. Reconnecting while the service wakes up…' } : prev) }
+    client.onWebSocketClose = () => { setCallSocketReady(false); setRoundTwoInterview(prev => prev && prev.status !== 'complete' ? { ...prev, status: 'connecting', message: 'Connection interrupted. Reconnecting…' } : prev) }
     client.activate()
     return () => { setCallSocketReady(false); if (draftTimer.current) clearTimeout(draftTimer.current); if (editorSyncTimer.current) clearTimeout(editorSyncTimer.current); stompClient.current = null; void client.deactivate() }
   }, [roundTwoInterviewOpen, attempt?.id])
@@ -148,6 +146,9 @@ export default function CandidateWorkspace() {
     if (!attempt || !text || !stompClient.current?.connected) return
     stompClient.current.publish({ destination: `/app/attempt/${attempt.id}/candidate-message`, body: JSON.stringify({ text }) })
     setCandidateReply(''); setRecruiterNotice('Your message was sent to the recruiter.')
+  }
+  function viewRecruiterFollowUp() {
+    window.dispatchEvent(new Event('cognihire:view-follow-up'))
   }
 
   const question = attempt?.questions[index]
@@ -282,7 +283,7 @@ export default function CandidateWorkspace() {
     return <div className="coding-workspace guided-workspace">
     <CandidateProctorHud attemptId={attempt.id} deadlineAt={attempt.deadlineAt} client={stompClient.current} connected={callSocketReady}/>
     <header className="coding-header"><Link to="/candidate" className="back-link">← Assessments</Link><strong>Round 2 · {roundTwoInterview?.status === 'complete' ? 'Interview review' : liveInterview ? 'AI interview' : activeRoundTwoQuestion?.subject ?? 'Review'}</strong><span className="timer"><Clock3 size={14}/>Deadline {deadline}</span></header>
-    <LiveVideoCall client={stompClient.current} connected={callSocketReady} attemptId={attempt.id} role="CANDIDATE"/><main className="guided-flow">{(recruiterNotice || recruiterTakeover) && <><div className="alert info live-recruiter-notice">{recruiterNotice || 'A recruiter is connected to this session.'}<button type="button" onClick={() => setRecruiterNotice('')}>Dismiss</button></div>{recruiterTakeover && <form className="candidate-live-reply" onSubmit={event => { event.preventDefault(); sendRecruiterMessage() }}><textarea aria-label="Message the recruiter" value={candidateReply} onChange={event => setCandidateReply(event.target.value)} maxLength={2000} placeholder="Message the recruiter directly…"/><Button onClick={sendRecruiterMessage} disabled={!candidateReply.trim() || !stompClient.current?.connected}>Send to recruiter <ArrowRight size={14}/></Button></form>}</>}<div className="guided-progress"><span>{liveInterview ? `AI interview · Question ${roundTwoInterview?.questionNumber || 1} of ${roundTwoInterview?.totalQuestions || roundTwo.totalQuestions}` : `Round 2 · Question ${roundTwoIndex + 1} of ${roundTwo.totalQuestions}`}</span><strong>{roundTwo.complete ? 'AI technical interview' : 'Subject MCQs'}</strong><span>{roundTwo.complete ? 'Answers save as you go' : 'Revisit any question before final submission'}</span></div>
+    <LiveVideoCall client={stompClient.current} connected={callSocketReady} attemptId={attempt.id} role="CANDIDATE"/><main className="guided-flow">{(recruiterNotice || recruiterTakeover) && <><div className="alert info live-recruiter-notice">{recruiterNotice || 'A recruiter is connected to this session.'}{recruiterNotice.toLowerCase().includes('follow-up') && <button type="button" onClick={viewRecruiterFollowUp}>View</button>}<button type="button" onClick={() => setRecruiterNotice('')}>Dismiss</button></div>{recruiterTakeover && <form className="candidate-live-reply" onSubmit={event => { event.preventDefault(); sendRecruiterMessage() }}><textarea aria-label="Message the recruiter" value={candidateReply} onChange={event => setCandidateReply(event.target.value)} maxLength={2000} placeholder="Message the recruiter directly…"/><Button onClick={sendRecruiterMessage} disabled={!candidateReply.trim() || !stompClient.current?.connected}>Send to recruiter <ArrowRight size={14}/></Button></form>}</>}<div className="guided-progress"><span>{liveInterview ? `AI interview · Question ${roundTwoInterview?.questionNumber || 1} of ${roundTwoInterview?.totalQuestions || roundTwo.totalQuestions}` : `Round 2 · Question ${roundTwoIndex + 1} of ${roundTwo.totalQuestions}`}</span><strong>{roundTwo.complete ? 'AI technical interview' : 'Subject MCQs'}</strong><span>{roundTwo.complete ? 'Answers save as you go' : 'Revisit any question before final submission'}</span></div>
       {!liveInterview && <nav className="candidate-step-nav" aria-label="Round 2 question navigation">{roundTwo.questions.map((q, i) => <button type="button" key={q.id} className={`candidate-step ${i === roundTwoIndex ? 'active' : ''} ${q.selectedOption ? 'done' : ''}`} onClick={() => { setRoundTwoIndex(i); setError('') }}>Q{i + 1}{q.selectedOption ? ' · answered' : ''}</button>)}</nav>}
       {error && <div className="alert error">{error}</div>}
       {roundTwo.complete && !roundTwoInterview && <section className="guided-stage guided-stage-main"><div className="eyebrow">PART 1 COMPLETE</div><h1>Subject questions complete</h1><p>The interviewer will ask recruiter-set questions for this assessment. If none were added, role-based technical questions will be used.</p><Button onClick={openRoundTwoInterview} disabled={busy}>Start AI interview <ArrowRight size={14}/></Button></section>}
@@ -301,7 +302,7 @@ export default function CandidateWorkspace() {
       <div className="guided-progress"><span>Question {index + 1} of {attempt.questions.length}</span><strong>{stepName}</strong><span>{question.difficulty.toLowerCase()} · {question.points} points</span></div>
       <nav className="candidate-step-nav" aria-label="Assessment question navigation">{attempt.questions.slice(0, visitedIndex + 1).map((q, i) => <button type="button" key={q.id} className={`candidate-step ${i === index ? 'active' : ''} ${work[q.id]?.codeSubmitted ? 'done' : ''}`} onClick={() => { setIndex(i); setRunResult(null); setError('') }}>Q{i + 1} · {q.title}</button>)}</nav>
       <nav className="candidate-step-nav phase-nav" aria-label="Question phase navigation">{([['warmup','Dry-run'],['code','Coding'],['interview','AI interview']] as const).map(([phase,label]) => { const order = ['warmup','code','interview']; const reached = current.codeSubmitted ? 2 : order.indexOf(current.phase); return <button type="button" key={phase} className={`candidate-step ${current.phase === phase ? 'active' : ''}`} disabled={busy || order.indexOf(phase) > reached} onClick={() => void revisitPhase(phase)}>{label}</button> })}</nav>
-      {error && <div className="alert error">{error}</div>}{(recruiterNotice || recruiterTakeover) && <><div className="alert info live-recruiter-notice">{recruiterNotice || 'A recruiter is connected to this session.'}<button type="button" onClick={() => setRecruiterNotice('')}>Dismiss</button></div>{recruiterTakeover && <form className="candidate-live-reply" onSubmit={event => { event.preventDefault(); sendRecruiterMessage() }}><textarea aria-label="Message the recruiter" value={candidateReply} onChange={event => setCandidateReply(event.target.value)} maxLength={2000} placeholder="Message the recruiter directly…"/><Button onClick={sendRecruiterMessage} disabled={!candidateReply.trim() || !stompClient.current?.connected}>Send to recruiter <ArrowRight size={14}/></Button></form>}</>}{notice && <div className="alert info">{notice}<button type="button" onClick={() => setNotice('')}>Dismiss</button></div>}
+      {error && <div className="alert error">{error}</div>}{(recruiterNotice || recruiterTakeover) && <><div className="alert info live-recruiter-notice">{recruiterNotice || 'A recruiter is connected to this session.'}{recruiterNotice.toLowerCase().includes('follow-up') && <button type="button" onClick={viewRecruiterFollowUp}>View</button>}<button type="button" onClick={() => setRecruiterNotice('')}>Dismiss</button></div>{recruiterTakeover && <form className="candidate-live-reply" onSubmit={event => { event.preventDefault(); sendRecruiterMessage() }}><textarea aria-label="Message the recruiter" value={candidateReply} onChange={event => setCandidateReply(event.target.value)} maxLength={2000} placeholder="Message the recruiter directly…"/><Button onClick={sendRecruiterMessage} disabled={!candidateReply.trim() || !stompClient.current?.connected}>Send to recruiter <ArrowRight size={14}/></Button></form>}</>}{notice && <div className="alert info">{notice}<button type="button" onClick={() => setNotice('')}>Dismiss</button></div>}
       {current.phase === 'warmup' && <section className="guided-stage guided-stage-main"><h1>Dry-run warm-up</h1><p className="problem-text">{question.statement}</p><p>Trace the public examples first. Their expected outputs are hidden during this step.</p>
         {question.publicSamples.map((sample, i) => <div className="sample-case" key={i}><strong>Example {i + 1}</strong><span>Input</span><code>{sample.input}</code><label>Predicted output<textarea value={current.predictions[i] ?? ''} onChange={e => update({ predictions: question.publicSamples.map((_, n) => n === i ? e.target.value : (current.predictions[n] ?? '')), codeSubmitted: false })} rows={2} maxLength={2000} placeholder="Write the output you expect"/></label></div>)}
         <label>Your reasoning<textarea value={current.reasoning} onChange={e => update({ reasoning: e.target.value, codeSubmitted: false })} rows={4} maxLength={3000} placeholder="Explain how you traced the example and which edge case you considered."/></label>

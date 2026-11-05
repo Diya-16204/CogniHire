@@ -25,19 +25,23 @@ interface CodeExecutionProvider {
 class Judge0CodeExecutionProvider implements CodeExecutionProvider {
   private static final Logger log=LoggerFactory.getLogger(Judge0CodeExecutionProvider.class);
   private static final String PISTON_PYTHON_VERSION="3.10.0";
-  private final String baseUrl,pistonUrl,apiKey,rapidApiHost;
+  private final String baseUrl,pistonUrl,pistonPublicUrl,pistonApiKey,apiKey,rapidApiHost;
   private final boolean pistonEnabled;
   private final ObjectMapper mapper;
   private final HttpClient client=HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(5)).build();
 
   Judge0CodeExecutionProvider(@Value("${judge0.base-url}") String baseUrl,
       @Value("${piston.url:http://localhost:2000}") String pistonUrl,
+      @Value("${piston.public-url:}") String pistonPublicUrl,
+      @Value("${piston.api-key:}") String pistonApiKey,
       @Value("${piston.enabled:true}") boolean pistonEnabled,
       @Value("${judge0.api-key}") String apiKey,
       @Value("${judge0.rapidapi-host}") String rapidApiHost,
       ObjectMapper mapper) {
     this.baseUrl=baseUrl==null?"":baseUrl.trim().replaceAll("/+$","");
-    this.pistonUrl=pistonUrl==null?"http://localhost:2000":pistonUrl.trim().replaceAll("/+$","");
+    this.pistonUrl=pistonUrl==null?"":pistonUrl.trim().replaceAll("/+$","");
+    this.pistonPublicUrl=pistonPublicUrl==null?"":pistonPublicUrl.trim().replaceAll("/+$","");
+    this.pistonApiKey=pistonApiKey==null?"":pistonApiKey.trim();
     this.pistonEnabled=pistonEnabled;
     this.apiKey=apiKey==null?"":apiKey.trim();
     this.rapidApiHost=rapidApiHost==null?"":rapidApiHost.trim();
@@ -45,9 +49,18 @@ class Judge0CodeExecutionProvider implements CodeExecutionProvider {
   }
 
   @Override public Judge0Result execute(String sourceCode,String stdin,int languageId) {
-    if(baseUrl.contains("emkc.org")||baseUrl.contains("piston")||baseUrl.contains(":2000")||(baseUrl.isBlank()&&!pistonUrl.isBlank())) {
+    if(baseUrl.contains("emkc.org")||baseUrl.contains("piston")||baseUrl.contains(":2000")||baseUrl.isBlank()) {
       if(!pistonEnabled) throw new Judge0Unavailable(HttpStatus.SERVICE_UNAVAILABLE,"Code execution is disabled in this deployment; configure a private Piston service to enable it.");
-      return executePiston(sourceCode,stdin);
+      if(!pistonUrl.isBlank()) {
+        try { return executePiston(pistonUrl,sourceCode,stdin,false); }
+        catch(Judge0Unavailable localError) {
+          if(localError.httpStatus()!=HttpStatus.SERVICE_UNAVAILABLE||pistonPublicUrl.isBlank()) throw localError;
+          log.warn("Local Piston unavailable; trying configured public Piston fallback: {}",localError.getMessage());
+          return executePiston(pistonPublicUrl,sourceCode,stdin,true);
+        }
+      }
+      if(!pistonPublicUrl.isBlank()) return executePiston(pistonPublicUrl,sourceCode,stdin,true);
+      throw new Judge0Unavailable("No Piston endpoint is configured. Set PISTON_LOCAL_URL or PISTON_PUBLIC_URL.");
     }
     if(baseUrl.isBlank())throw new Judge0Unavailable("The code execution service is not configured");
     if(baseUrl.contains("rapidapi.com")&&apiKey.isBlank())throw new Judge0Unavailable("Set JUDGE0_API_KEY in the backend .env file");
@@ -81,15 +94,17 @@ class Judge0CodeExecutionProvider implements CodeExecutionProvider {
     } catch(Judge0Unavailable e) { throw e; }
     catch(Exception e) { throw new Judge0Unavailable("Judge0 is unreachable or returned an invalid response"); }
   }
-  private Judge0Result executePiston(String sourceCode,String stdin) {
+  private Judge0Result executePiston(String endpoint,String sourceCode,String stdin,boolean publicEndpoint) {
     try {
       var payload=Map.of(
           "language","python",
           "version",PISTON_PYTHON_VERSION,
           "files",java.util.List.of(Map.of("content",sourceCode)),
           "stdin",stdin==null?"":stdin);
-      var request=HttpRequest.newBuilder(URI.create(pistonUrl+"/api/v2/execute")).timeout(Duration.ofSeconds(15))
-          .header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(payload))).build();
+      var requestBuilder=HttpRequest.newBuilder(URI.create(pistonExecuteUrl(endpoint))).timeout(Duration.ofSeconds(15))
+          .header("Content-Type","application/json");
+      if(publicEndpoint&&!pistonApiKey.isBlank()) requestBuilder.header("X-Auth-Token",pistonApiKey);
+      var request=requestBuilder.POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(payload))).build();
       var response=client.send(request,HttpResponse.BodyHandlers.ofString());
       if(response.statusCode()<200||response.statusCode()>=300) {
         log.error("Piston execution failed: HTTP {} response body: {}",response.statusCode(),response.body());
@@ -110,9 +125,15 @@ class Judge0CodeExecutionProvider implements CodeExecutionProvider {
     } catch(InterruptedException e) {
       Thread.currentThread().interrupt(); throw new Judge0Unavailable("Piston request was interrupted");
     } catch(Judge0Unavailable e) { throw e; }
-    catch(HttpTimeoutException e) { throw new Judge0Unavailable("Piston did not respond within 15 seconds. Check that its Docker container is running."); }
-    catch(java.net.ConnectException e) { throw new Judge0Unavailable("Cannot connect to Piston at "+baseUrl+". Start the local Piston container and retry."); }
+    catch(HttpTimeoutException e) { throw new Judge0Unavailable("Piston did not respond within 15 seconds: "+endpoint); }
+    catch(java.net.ConnectException e) { throw new Judge0Unavailable("Cannot connect to Piston at "+endpoint+"."); }
     catch(Exception e) { throw new Judge0Unavailable("Piston is unreachable or returned an invalid response: "+safeMessage(e)); }
+  }
+  private String pistonExecuteUrl(String endpoint) {
+    String normalized=endpoint.replaceAll("/+$","");
+    if(normalized.endsWith("/api/v2")||normalized.endsWith("/api/v2/piston")) return normalized+"/execute";
+    if(normalized.endsWith("/execute")) return normalized;
+    return normalized+"/api/v2/execute";
   }
   private String pistonErrorMessage(String body,int status) {
     try {

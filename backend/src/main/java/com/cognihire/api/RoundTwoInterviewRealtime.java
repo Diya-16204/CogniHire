@@ -50,6 +50,11 @@ class RoundTwoInterviewSocketController {
   @MessageMapping("/attempt/{attemptId}/editor-sync") void editorSync(@DestinationVariable String attemptId,LiveEditorSyncCommand command,Principal principal){liveMonitoring.syncEditor(UUID.fromString(attemptId),UUID.fromString(principal.getName()),command.questionId(),command.language(),command.code());}
   @MessageMapping("/attempt/{attemptId}/intervene") void intervene(@DestinationVariable String attemptId,LiveInterventionCommand command,Principal principal){interviews.intervene(UUID.fromString(attemptId),command,principal);}
   @MessageMapping("/attempt/{attemptId}/candidate-message") void candidateMessage(@DestinationVariable String attemptId,LiveCandidateMessage command,Principal principal){liveMonitoring.candidateMessage(UUID.fromString(attemptId),UUID.fromString(principal.getName()),command.text());}
+  @MessageMapping("/attempt/{attemptId}/intervention-answer") void interventionAnswer(@DestinationVariable String attemptId,RecruiterInterventionAnswer command,Principal principal){
+    if (!(principal instanceof org.springframework.security.core.Authentication auth) || auth.getAuthorities().stream().noneMatch(a->a.getAuthority().equals("ROLE_CANDIDATE")))
+      throw new ResponseStatusException(HttpStatus.FORBIDDEN,"Only the assigned candidate can answer recruiter follow-ups");
+    liveMonitoring.answerIntervention(UUID.fromString(attemptId),UUID.fromString(principal.getName()),command);
+  }
   @MessageMapping("/attempt/{attemptId}/proctor-event") void proctorEvent(@DestinationVariable String attemptId,CandidateProctorEventCommand command,Principal principal){
     if (!(principal instanceof org.springframework.security.core.Authentication auth) || auth.getAuthorities().stream().noneMatch(a->a.getAuthority().equals("ROLE_CANDIDATE")))
       throw new ResponseStatusException(HttpStatus.FORBIDDEN,"Only the assigned candidate can publish assessment focus events");
@@ -142,6 +147,7 @@ class RoundTwoInterviewService {
           save(new RoundTwoInterviewState(state.attemptId(),state.candidateId(),List.copyOf(prompts),state.questionIndex(),state.subject(),state.prompt(),state.draft(),state.complete(),state.readyAtEpochMillis(),state.transcript()));
         }
       }
+      liveMonitoring.createIntervention(attemptId,UUID.fromString(recruiterId),text);
       send(candidateId,new InterviewWsEvent("PROMPT_QUEUED",attemptId.toString(),0,0,"Recruiter follow-up","", "The recruiter added a follow-up question.",0,List.of()));
       return;
     }

@@ -6,6 +6,10 @@ import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Controller;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.context.event.EventListener;
+import org.springframework.web.socket.messaging.SessionDisconnectEvent;
+import org.springframework.web.socket.messaging.SessionSubscribeEvent;
+import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -33,6 +37,11 @@ record LiveTranscriptEvent(String type, String attemptId, String candidateName, 
 record LiveTurnView(int index, String subject, String question, String answer) {}
 record LiveCandidateMessage(String text) {}
 record CandidateProctorEventCommand(String type) {}
+record RecruiterPresenceEvent(String attemptId, boolean recruiterPresent, Instant updatedAt) {}
+record RecruiterInterventionEvent(String id, String attemptId, String question, String sender, Instant createdAt) {}
+record RecruiterInterventionAnswerEvent(String id, String attemptId, String answer, Instant answeredAt) {}
+record RecruiterInterventionAnswer(String interventionId, String answer) {}
+record RecruiterInterventionView(String id, String question, String answer, Instant createdAt, Instant answeredAt) {}
 record WebRtcSignalCommand(String type, Map<String, Object> payload) {}
 record WebRtcSignalEvent(String type, String attemptId, String senderId, String senderRole, String senderName,
                          Map<String, Object> payload, Instant sentAt) {}
@@ -44,17 +53,21 @@ class LiveMonitoringService {
   private final UserAccountRepository users;
   private final CodingQuestionRepository questions;
   private final RoundTwoInterviewTurnRepository turns;
+  private final RecruiterInterventionRepository interventions;
   private final SimpMessagingTemplate messaging;
   private final Map<String, LiveCodeSnapshot> editorSnapshots = new ConcurrentHashMap<>();
   private final Map<String, Boolean> recruiterTakeover = new ConcurrentHashMap<>();
   private final Map<String, List<String>> queuedPrompts = new ConcurrentHashMap<>();
+  private final Map<String, java.util.Set<String>> activeRecruiterSessions = new ConcurrentHashMap<>();
+  private final Map<String, java.util.Set<String>> attemptsBySocketSession = new ConcurrentHashMap<>();
 
   LiveMonitoringService(AssessmentAttemptRepository attempts, UserAccountRepository users, CodingQuestionRepository questions, RoundTwoInterviewTurnRepository turns,
-                        SimpMessagingTemplate messaging) {
+                        RecruiterInterventionRepository interventions, SimpMessagingTemplate messaging) {
     this.attempts = attempts;
     this.users = users;
     this.questions = questions;
     this.turns = turns;
+    this.interventions = interventions;
     this.messaging = messaging;
   }
 
@@ -63,9 +76,10 @@ class LiveMonitoringService {
     return attempts.findLiveForRecruiter(recruiterId).stream().map(LiveMonitoringService::view).toList();
   }
 
-  @Transactional(readOnly = true)
+  @Transactional
   LiveSessionDetail detail(UUID attemptId, UUID recruiterId) {
     var attempt = requireOwnedAttempt(attemptId, recruiterId);
+    markRecruiterJoined(attempt);
     var transcript = turns.findByAttemptIdOrderByTurnIndexAsc(attemptId).stream()
         .map(turn -> new LiveTurnView(turn.turnIndex, turn.subject, turn.prompt, turn.answer)).toList();
     return new LiveSessionDetail(view(attempt), editorSnapshots.get(attemptId.toString()), transcript, isTakeoverActive(attemptId.toString()));
@@ -74,6 +88,118 @@ class LiveMonitoringService {
   @Transactional(readOnly = true)
   void authorizeRecruiter(UUID attemptId, UUID recruiterId) {
     requireOwnedAttempt(attemptId, recruiterId);
+  }
+
+  @Transactional
+  void recruiterConnected(UUID attemptId, UUID recruiterId, String socketSessionId) {
+    var attempt = requireOwnedAttempt(attemptId, recruiterId);
+    markRecruiterJoined(attempt);
+    if (socketSessionId == null || socketSessionId.isBlank()) return;
+    attemptsBySocketSession.computeIfAbsent(socketSessionId, ignored -> ConcurrentHashMap.newKeySet()).add(attemptId.toString());
+    boolean wasOffline = activeRecruiterSessions.computeIfAbsent(attemptId.toString(), ignored -> ConcurrentHashMap.newKeySet()).isEmpty();
+    activeRecruiterSessions.get(attemptId.toString()).add(socketSessionId);
+    if (wasOffline) publishPresence(attemptId, true);
+  }
+
+  @EventListener
+  void socketDisconnected(SessionDisconnectEvent event) {
+    String sessionId = event.getSessionId();
+    var attemptIds = attemptsBySocketSession.remove(sessionId);
+    if (attemptIds == null) return;
+    for (String attemptId : attemptIds) {
+      var active = activeRecruiterSessions.get(attemptId);
+      if (active != null) {
+        active.remove(sessionId);
+        if (active.isEmpty() && activeRecruiterSessions.remove(attemptId, active)) publishPresence(UUID.fromString(attemptId), false);
+      }
+    }
+  }
+
+  @EventListener
+  void subscribed(SessionSubscribeEvent event) {
+    StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
+    String destination = accessor.getDestination();
+    if (destination == null || !destination.matches("/topic/assessment/[0-9a-fA-F-]{36}/presence")
+        || accessor.getUser() == null || !(accessor.getUser() instanceof Authentication auth)
+        || auth.getAuthorities().stream().noneMatch(a -> a.getAuthority().equals("ROLE_CANDIDATE"))) return;
+    String[] parts = destination.split("/");
+    publishCurrentPresence(UUID.fromString(parts[3]));
+  }
+
+  private void markRecruiterJoined(AssessmentAttempt attempt) {
+    if (!attempt.recruiterJoinedDuringTest) {
+      attempt.recruiterJoinedDuringTest = true;
+      attempt.recruiterJoinedAt = java.time.LocalDateTime.now();
+      attempts.save(attempt);
+    }
+  }
+
+  private void publishPresence(UUID attemptId, boolean present) {
+    messaging.convertAndSend("/topic/assessment/" + attemptId + "/presence",
+        new RecruiterPresenceEvent(attemptId.toString(), present, Instant.now()));
+  }
+
+  void publishCurrentPresence(UUID attemptId) {
+    publishPresence(attemptId, !activeRecruiterSessions.getOrDefault(attemptId.toString(), java.util.Set.of()).isEmpty());
+  }
+
+  @Transactional
+  RecruiterInterventionEvent createIntervention(UUID attemptId, UUID recruiterId, String question) {
+    var attempt = requireOwnedAttempt(attemptId, recruiterId);
+    var intervention = new RecruiterIntervention();
+    intervention.attempt = attempt;
+    intervention.recruiter = users.findById(recruiterId).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Recruiter account not found"));
+    intervention.question = question;
+    intervention = interventions.save(intervention);
+    var event = new RecruiterInterventionEvent(intervention.id.toString(), attemptId.toString(), question,
+        intervention.recruiter.fullName, intervention.createdAt);
+    messaging.convertAndSend("/topic/assessment/" + attemptId + "/interventions", event);
+    publishTranscript(attemptId.toString(), new LiveTranscriptEvent("RECRUITER_FOLLOW_UP", attemptId.toString(),
+        intervention.recruiter.fullName, "Recruiter follow-up", question, "", question, intervention.createdAt));
+    return event;
+  }
+
+  @Transactional
+  void answerIntervention(UUID attemptId, UUID candidateId, RecruiterInterventionAnswer command) {
+    if (command == null || command.interventionId() == null || command.answer() == null || command.answer().isBlank() || command.answer().length() > 4000)
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Enter an answer of up to 4,000 characters");
+    var attempt = attempts.findByIdAndCandidateId(attemptId, candidateId)
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Assessment session not found"));
+    UUID interventionId;
+    try { interventionId = UUID.fromString(command.interventionId()); }
+    catch (IllegalArgumentException ex) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A valid follow-up ID is required"); }
+    if (!"IN_PROGRESS".equals(attempt.status)) throw new ResponseStatusException(HttpStatus.CONFLICT, "This assessment is no longer active");
+    var intervention = interventions.findByIdAndAttemptId(interventionId, attemptId)
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Recruiter follow-up not found"));
+    if (intervention.answeredAt != null) throw new ResponseStatusException(HttpStatus.CONFLICT, "This follow-up has already been answered");
+    intervention.answer = command.answer().trim();
+    intervention.answeredAt = Instant.now();
+    interventions.save(intervention);
+    messaging.convertAndSend("/topic/assessment/" + attemptId + "/interventions",
+        new RecruiterInterventionAnswerEvent(intervention.id.toString(), attemptId.toString(), intervention.answer, intervention.answeredAt));
+    publishTranscript(attemptId.toString(), new LiveTranscriptEvent("RECRUITER_FOLLOW_UP_ANSWER", attemptId.toString(),
+        attempt.candidate.fullName, "Recruiter follow-up", intervention.question, intervention.answer,
+        "Candidate answered the recruiter follow-up.", intervention.answeredAt));
+  }
+
+  @Transactional(readOnly = true)
+  List<RecruiterInterventionView> interventionAudit(UUID attemptId) {
+    return interventions.findByAttemptIdOrderByCreatedAtAsc(attemptId).stream()
+        .map(item -> new RecruiterInterventionView(item.id.toString(), item.question, item.answer, item.createdAt, item.answeredAt)).toList();
+  }
+
+  @Transactional(readOnly = true)
+  List<RecruiterInterventionView> candidateInterventionAudit(UUID attemptId, UUID candidateId) {
+    attempts.findByIdAndCandidateId(attemptId, candidateId)
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Assessment session not found"));
+    return interventionAudit(attemptId);
+  }
+
+  @Transactional(readOnly = true)
+  boolean authorizeAttemptParticipant(UUID attemptId, UUID userId, boolean recruiter) {
+    return recruiter
+        ? attempts.findForRecruiter(attemptId, userId).isPresent()
+        : attempts.findByIdAndCandidateId(attemptId, userId).isPresent();
   }
 
   @Transactional(readOnly = true)

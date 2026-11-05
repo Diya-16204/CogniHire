@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
@@ -120,6 +121,8 @@ class AssessmentAttempt {
   @Column(name="github_repository_url", length=500) String githubRepositoryUrl;
   @JdbcTypeCode(SqlTypes.JSON) @Column(name="round_two_interview_questions",nullable=false,columnDefinition="jsonb") JsonNode roundTwoInterviewQuestions=JsonNodeFactory.instance.arrayNode();
   @Column(name="round_two_interview_completed_at") Instant roundTwoInterviewCompletedAt;
+  @Column(name="recruiter_joined_during_test", nullable=false) boolean recruiterJoinedDuringTest=false;
+  @Column(name="recruiter_joined_at") LocalDateTime recruiterJoinedAt;
   protected AssessmentAttempt() {}
 }
 interface AssessmentAttemptRepository extends org.springframework.data.jpa.repository.JpaRepository<AssessmentAttempt,UUID> {

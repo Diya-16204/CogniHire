@@ -58,7 +58,17 @@ class InterviewWebSocketConfig implements WebSocketMessageBrokerConfigurer {
         } else if(accessor.getUser()==null) throw new IllegalArgumentException("Interview socket is not authenticated");
         if(accessor.getCommand()==StompCommand.SUBSCRIBE) {
           String destination=accessor.getDestination();
-          if(destination!=null&&destination.matches("/topic/attempt/[0-9a-fA-F-]{36}/(editor|transcript|webrtc)")) {
+          if(destination!=null&&destination.matches("/topic/assessment/[0-9a-fA-F-]{36}/(presence|interventions)")) {
+            String[] parts=destination.split("/");
+            try {
+              var attemptId=java.util.UUID.fromString(parts[3]);
+              var liveMonitoring=liveMonitoringProvider.getObject();
+              boolean recruiter=hasRole(accessor,"RECRUITER");
+              if(!recruiter&&!hasRole(accessor,"CANDIDATE"))throw new IllegalArgumentException("Only assessment participants can subscribe");
+              if(!liveMonitoring.authorizeAttemptParticipant(attemptId,java.util.UUID.fromString(accessor.getUser().getName()),recruiter))
+                throw new IllegalArgumentException("You are not a participant in this assessment session");
+            } catch(RuntimeException ex) { throw new IllegalArgumentException("You are not authorized to subscribe to this assessment"); }
+          } else if(destination!=null&&destination.matches("/topic/attempt/[0-9a-fA-F-]{36}/(editor|transcript|webrtc)")) {
             String[] parts=destination.split("/");
             try {
               var attemptId=java.util.UUID.fromString(parts[3]);
@@ -70,6 +80,7 @@ class InterviewWebSocketConfig implements WebSocketMessageBrokerConfigurer {
               } else {
                 if(!hasRole(accessor,"RECRUITER"))throw new IllegalArgumentException("Only recruiters can monitor live assessment sessions");
                 liveMonitoring.authorizeRecruiter(attemptId,java.util.UUID.fromString(accessor.getUser().getName()));
+                liveMonitoring.recruiterConnected(attemptId,java.util.UUID.fromString(accessor.getUser().getName()),accessor.getSessionId());
               }
             }
             catch(RuntimeException ex) { throw new IllegalArgumentException("You are not authorized to monitor this assessment session"); }
@@ -87,6 +98,8 @@ class InterviewWebSocketConfig implements WebSocketMessageBrokerConfigurer {
             throw new IllegalArgumentException("Only candidates can send candidate messages");
           if(destination!=null&&destination.matches("/app/attempt/[0-9a-fA-F-]{36}/proctor-event")&&!hasRole(accessor,"CANDIDATE"))
             throw new IllegalArgumentException("Only candidates can publish assessment focus events");
+          if(destination!=null&&destination.matches("/app/attempt/[0-9a-fA-F-]{36}/intervention-answer")&&!hasRole(accessor,"CANDIDATE"))
+            throw new IllegalArgumentException("Only candidates can answer recruiter follow-ups");
           if(destination!=null&&destination.matches("/app/attempt/[0-9a-fA-F-]{36}/webrtc-signal")&&!hasRole(accessor,"RECRUITER")&&!hasRole(accessor,"CANDIDATE"))
             throw new IllegalArgumentException("Only recruiters and candidates can send call signals");
           if(destination!=null&&destination.matches("/app/interview\\.(start|draft|answer)")&&!hasRole(accessor,"CANDIDATE"))

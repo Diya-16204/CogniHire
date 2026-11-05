@@ -24,6 +24,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -39,7 +40,8 @@ class CandidateWorkflowController {
   private final GitHubService github;
   private final GitHubQuestionSynthesizer githubQuestionSynthesizer;
   private final LiveMonitoringService liveMonitoring;
-  CandidateWorkflowController(AssessmentRepository assessments,UserAccountRepository users,AssessmentAssignmentRepository assignments,AssessmentAttemptRepository attempts,CodingQuestionRepository questions,CodeSubmissionRepository submissions,CodeExecutionProvider execution,ObjectMapper objectMapper,QuestionRepository roundTwoQuestions,CodingAttemptMcqAnswerRepository roundTwoAnswers,RoundTwoInterviewQuestionRepository roundTwoInterviewQuestions,GitHubService github,GitHubQuestionSynthesizer githubQuestionSynthesizer,LiveMonitoringService liveMonitoring) { this.assessments=assessments;this.users=users;this.assignments=assignments;this.attempts=attempts;this.questions=questions;this.submissions=submissions;this.execution=execution;this.objectMapper=objectMapper;this.roundTwoQuestions=roundTwoQuestions;this.roundTwoAnswers=roundTwoAnswers;this.roundTwoInterviewQuestions=roundTwoInterviewQuestions;this.github=github;this.githubQuestionSynthesizer=githubQuestionSynthesizer;this.liveMonitoring=liveMonitoring; }
+  private final RoundTwoInterviewTurnRepository roundTwoInterviewTurns;
+  CandidateWorkflowController(AssessmentRepository assessments,UserAccountRepository users,AssessmentAssignmentRepository assignments,AssessmentAttemptRepository attempts,CodingQuestionRepository questions,CodeSubmissionRepository submissions,CodeExecutionProvider execution,ObjectMapper objectMapper,QuestionRepository roundTwoQuestions,CodingAttemptMcqAnswerRepository roundTwoAnswers,RoundTwoInterviewQuestionRepository roundTwoInterviewQuestions,GitHubService github,GitHubQuestionSynthesizer githubQuestionSynthesizer,LiveMonitoringService liveMonitoring,RoundTwoInterviewTurnRepository roundTwoInterviewTurns) { this.assessments=assessments;this.users=users;this.assignments=assignments;this.attempts=attempts;this.questions=questions;this.submissions=submissions;this.execution=execution;this.objectMapper=objectMapper;this.roundTwoQuestions=roundTwoQuestions;this.roundTwoAnswers=roundTwoAnswers;this.roundTwoInterviewQuestions=roundTwoInterviewQuestions;this.github=github;this.githubQuestionSynthesizer=githubQuestionSynthesizer;this.liveMonitoring=liveMonitoring;this.roundTwoInterviewTurns=roundTwoInterviewTurns; }
   private UUID userId(Authentication auth){return UUID.fromString(auth.getName());}
   private void requireRole(Authentication a,String role){if(!a.getAuthorities().stream().anyMatch(x->x.getAuthority().equals("ROLE_"+role)||x.getAuthority().equals("ROLE_ADMIN")))throw new ResponseStatusException(HttpStatus.FORBIDDEN);}
   record AssignRequest(@Email @NotBlank String email) {}
@@ -60,8 +62,9 @@ class CandidateWorkflowController {
   record SubmitAssessmentRequest(@jakarta.validation.constraints.NotEmpty @Size(max=50) List<@Valid SubmittedQuestion> questions) {}
   record SubmitAssessmentResponse(String attemptId,String status,Instant submittedAt,int submittedQuestionCount) {}
   record SubmittedQuestionView(String questionId,String title,String language,String sourceCode,Object evidence) {}
-  record RoundTwoAnswerView(String subject,String questionText,String selectedOption,String correctOption,boolean correct) {}
-  record SubmittedCandidateWork(String attemptId,String candidateName,String candidateEmail,Instant startedAt,Instant submittedAt,Integer roundTwoScore,Integer roundTwoTotal,List<RoundTwoAnswerView> roundTwoAnswers,List<SubmittedQuestionView> questions) {}
+  record RoundTwoAnswerView(String subject,String questionText,String selectedOption,String correctOption,boolean correct,Instant answeredAt) {}
+  record InterviewAuditTurnView(int index,String subject,String question,String answer,Instant answeredAt) {}
+  record SubmittedCandidateWork(String attemptId,String candidateName,String candidateEmail,Instant startedAt,Instant submittedAt,Integer roundTwoScore,Integer roundTwoTotal,List<RoundTwoAnswerView> roundTwoAnswers,boolean recruiterJoinedDuringTest,LocalDateTime recruiterJoinedAt,List<InterviewAuditTurnView> interviewTranscript,List<RecruiterInterventionView> recruiterInterventions,List<SubmittedQuestionView> questions) {}
   record InterviewCompleteRequest(@Size(max=8) List<@Valid InterviewTurn> transcript) {}
   record RoundTwoQuestionView(String id,String subject,String questionText,String optionA,String optionB,String optionC,String optionD) {}
   record RoundTwoReviewQuestion(String id,String subject,String questionText,String optionA,String optionB,String optionC,String optionD,String selectedOption) {}
@@ -298,6 +301,12 @@ class CandidateWorkflowController {
     return roundTwoProgress(attempt);
   }
 
+  @GetMapping({"/api/v1/candidate/attempts/{attemptId}/interventions", "/api/v1/candidate/attempts/{attemptId}/follow-ups"}) @Transactional(readOnly=true)
+  ResponseEntity<List<RecruiterInterventionView>> candidateInterventions(@PathVariable UUID attemptId,Authentication auth) {
+    requireRole(auth,"CANDIDATE");
+    return ResponseEntity.ok(liveMonitoring.candidateInterventionAudit(attemptId,userId(auth)));
+  }
+
   @GetMapping("/api/v1/candidate/attempts/{attemptId}/round-two/current") @Transactional(readOnly=true)
   RoundTwoProgress currentRoundTwo(@PathVariable UUID attemptId,Authentication auth) {
     requireRole(auth,"CANDIDATE"); var attempt=attempts.findByIdAndCandidateId(attemptId,userId(auth)).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Attempt not found for this candidate"));
@@ -371,7 +380,10 @@ class CandidateWorkflowController {
     var assessment=(admin?assessments.findById(assessmentId):assessments.findByIdAndOwnerId(assessmentId,userId(auth))).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND));
     return attempts.findByAssignment_Assessment_IdAndStatusOrderBySubmittedAtDesc(assessment.id,"SUBMITTED").stream()
         .map(a->new SubmittedCandidateWork(a.id.toString(),a.candidate.fullName,a.candidate.email,a.startedAt,a.submittedAt,a.roundTwoScore,a.roundTwoTotal,
-            roundTwoAnswers.findByAttemptIdOrderByAnsweredAtAscIdAsc(a.id).stream().map(answer->new RoundTwoAnswerView(answer.question.subject,answer.question.questionText,answer.selectedOption,answer.question.correctOption,answer.isCorrect)).toList(),
+            roundTwoAnswers.findByAttemptIdOrderByAnsweredAtAscIdAsc(a.id).stream().map(answer->new RoundTwoAnswerView(answer.question.subject,answer.question.questionText,answer.selectedOption,answer.question.correctOption,answer.isCorrect,answer.answeredAt)).toList(),
+            a.recruiterJoinedDuringTest,a.recruiterJoinedAt,
+            roundTwoInterviewTurns.findByAttemptIdOrderByTurnIndexAsc(a.id).stream().map(turn->new InterviewAuditTurnView(turn.turnIndex,turn.subject,turn.prompt,turn.answer,turn.answeredAt)).toList(),
+            liveMonitoring.interventionAudit(a.id),
             submissions.findByAttemptIdAndStatusOrderByCreatedAt(a.id,"SUBMITTED").stream()
                 .map(s->new SubmittedQuestionView(s.question.id.toString(),s.question.title,s.language,s.sourceCode,s.result)).toList())).toList();
   }

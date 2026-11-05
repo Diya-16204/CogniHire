@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Editor from '@monaco-editor/react'
-import { Client } from '@stomp/stompjs'
+import { Client, ReconnectionTimeMode } from '@stomp/stompjs'
 import { Activity, Eye, MessageSquarePlus, Radio, RefreshCw, Send, UserRound } from 'lucide-react'
-import { api, errorMessage } from './api'
+import { api, errorMessage, wsBaseUrl } from './api'
 import LiveVideoCall from './LiveVideoCall'
 
 type Session = { attemptId: string; candidateId: string; candidateName: string; candidateEmail: string; assessmentId: string; assessmentTitle: string; status: string; startedAt: string; deadlineAt: string }
@@ -53,11 +53,11 @@ export default function LiveCandidateMonitor() {
 
     const token = sessionStorage.getItem('cognihire-token')
     if (!token) { setError('Your login session is missing. Sign in again.'); return () => { active = false } }
-    const base = new URL(api.defaults.baseURL ?? 'http://localhost:8080/api/v1')
-    const client = new Client({ brokerURL: `${base.protocol === 'https:' ? 'wss:' : 'ws:'}//${base.host}/ws/interview`, connectHeaders: { Authorization: `Bearer ${token}` }, reconnectDelay: 2500, debug: () => {} })
+    const client = new Client({ brokerURL: wsBaseUrl, connectHeaders: { Authorization: `Bearer ${token}` }, reconnectDelay: 3000, maxReconnectDelay: 15000, reconnectTimeMode: ReconnectionTimeMode.EXPONENTIAL, heartbeatIncoming: 10000, heartbeatOutgoing: 10000, debug: () => {} })
     clientRef.current = client
     client.onConnect = () => {
       if (active) setSocketReady(true)
+      if (active) { setError(''); setNotice('') }
       client.subscribe(`/topic/attempt/${selectedId}/editor`, frame => {
         const event = JSON.parse(frame.body) as CodeSnapshot & RunResult & { type: string }
         if (event.type === 'CODE_UPDATE') setCode(event.code ?? '')
@@ -76,7 +76,7 @@ export default function LiveCandidateMonitor() {
       })
     }
     client.onStompError = frame => { if (active) setError(frame.headers.message || 'Live monitoring subscription was rejected.') }
-    client.onWebSocketError = () => { if (active) setError('Live connection lost. It will reconnect automatically.') }
+    client.onWebSocketError = () => { if (active) { setSocketReady(false); setNotice('Live connection interrupted. Reconnecting while the service wakes up…') } }
     client.onWebSocketClose = () => { if (active) setSocketReady(false) }
     client.activate()
     return () => { active = false; setSocketReady(false); clientRef.current = null; void client.deactivate() }
