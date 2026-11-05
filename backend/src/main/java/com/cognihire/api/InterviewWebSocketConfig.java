@@ -2,6 +2,7 @@ package com.cognihire.api;
 
 import io.jsonwebtoken.Claims;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.Message;
@@ -29,9 +30,9 @@ import java.util.List;
 @EnableWebSocketMessageBroker
 class InterviewWebSocketConfig implements WebSocketMessageBrokerConfigurer {
   private final JwtService jwt;
-  private final LiveMonitoringService liveMonitoring;
+  private final ObjectProvider<LiveMonitoringService> liveMonitoringProvider;
   private final String origins;
-  InterviewWebSocketConfig(JwtService jwt, LiveMonitoringService liveMonitoring, @Value("${app.frontend-origin}") String origins) { this.jwt=jwt; this.liveMonitoring=liveMonitoring; this.origins=origins; }
+  InterviewWebSocketConfig(JwtService jwt, ObjectProvider<LiveMonitoringService> liveMonitoringProvider, @Value("${app.frontend-origin}") String origins) { this.jwt=jwt; this.liveMonitoringProvider=liveMonitoringProvider; this.origins=origins; }
 
   @Override public void registerStompEndpoints(StompEndpointRegistry registry) {
     var allowedOrigins=java.util.Arrays.stream(origins.split(",")).map(String::trim).filter(origin->!origin.isBlank()).toArray(String[]::new);
@@ -61,6 +62,7 @@ class InterviewWebSocketConfig implements WebSocketMessageBrokerConfigurer {
             String[] parts=destination.split("/");
             try {
               var attemptId=java.util.UUID.fromString(parts[3]);
+              var liveMonitoring=liveMonitoringProvider.getObject();
               if("webrtc".equals(parts[4])) {
                 if(hasRole(accessor,"RECRUITER")) liveMonitoring.authorizeRecruiter(attemptId,java.util.UUID.fromString(accessor.getUser().getName()));
                 else if(!hasRole(accessor,"CANDIDATE") || !liveMonitoring.authorizeCandidate(attemptId,java.util.UUID.fromString(accessor.getUser().getName())))
