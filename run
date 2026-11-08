@@ -38,7 +38,7 @@ Frontend terminal mein diya URL kholo, usually http://localhost:5173. Pehli baar
 
 //PowerShell as Administrator
 Start-Service postgresql-x64-16
-Test-NetConnection localhost -Port 5432
+Test - NetConnection localhost -Port 5432
 
 cd D:\ProjectReal\CogniHire-main
 docker compose -f docker-compose.piston.yml up -d
