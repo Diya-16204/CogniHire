@@ -1,0 +1,27 @@
+### CogniHire Backend API Package (`com.cognihire.api`)
+
+* **`AiAssistanceController.java`**: Candidate AI coding hints and interview explanation endpoints (`/assistance`).
+* **`AiPolicyEngine.java`**: Policy engine enforcing AI feature budgets, non-revealing hint rules, prompt sanitization, and candidate penalty point calculations.
+* **`AssessmentAssignmentService.java`**: Handles candidate assignment creation, email normalization, and bulk `.xlsx` template generation and candidate imports via Apache POI.
+* **`AssessmentController.java`**: Standard assessment CRUD controller (`/api/v1/assessments`) for creating, updating, listing, and deleting assessments and coding questions.
+* **`AuthController.java`**: Public authentication controller handling account registration and login (`POST /api/v1/auth/register`, `POST /api/v1/auth/login`) with JWT generation.
+* **`CandidateWorkflowController.java`**: Candidate attempt lifecycle controller handling test starting (`/start`), live code execution (`/run`), code draft saving (`/draft`), and final solution submission (`/code-submit`).
+* **`CodeExecutionProvider.java`**: Integration client for sandboxed code execution, managing requests to local containerized Piston or external API fallbacks.
+* **`CogniHireApplication.java`**: Main Spring Boot entry point (`@SpringBootApplication`) that initializes component scanning, configuration, and backend execution.
+* **`DatabaseAdminController.java`**: Administrative REST controller exposing database maintenance functionality (`POST /api/admin/reset-db`).
+* **`DatabaseResetService.java`**: Service executing `db/reset_data.sql` to truncate domain tables while preserving Flyway migration history.
+* **`Domain.java`**: Central domain file containing core JPA Entities (`User`, `Assessment`, `CodingQuestion`, `AssessmentAttempt`, `CodeSubmission`) and transfer DTO records.
+* **`GitHubService.java`**: GitHub REST API client that parses candidate public repositories, extracts metadata/README contents, and synthesizes candidate interview questions.
+* **`GlobalExceptionHandler.java`**: Centralized `@ControllerAdvice` exception handler that catches uncaught application exceptions and returns structured JSON error responses.
+* **`InterviewWebSocketConfig.java`**: STOMP over WebSocket broker configuration (`/ws/interview`), setting up topic channels and JWT authentication interceptors.
+* **`LiveMonitoringController.java`**: Recruiter live supervision endpoints (`/api/v1/recruiter/live-sessions`) for monitoring active sessions, viewing code snapshots, sending interventions, and WebRTC signaling.
+* **`PistonRuntimeInitializer.java`**: System startup component that verifies local Piston execution runtimes (e.g., Python 3.10/3.12) are initialized.
+* **`RecruiterAssessmentController.java`**: Unified assessment builder API (`POST /api/recruiter/assessments/create`) for single-step assessment creation, coding problems, subject MCQs, and assignments.
+* **`RecruitmentControllers.java`**: Legacy REST controllers (`/api/assessments`, `/api/public/...`) for managing older MCQ-only assessments.
+* **`RecruitmentDtos.java`**: Legacy Data Transfer Objects (DTO records) for candidate MCQ submissions and responses.
+* **`RecruitmentEntities.java`**: Legacy JPA entities representing original MCQ tables (`AssessmentMcqQuestion`, `AssessmentMcqAttempt`).
+* **`RecruitmentServices.java`**: Legacy service logic for grading and validating original candidate MCQ attempts.
+* **`RoundTwoInterviewPromptCatalog.java`**: Static fallback question catalog for technical interviews when external LLM endpoints are unconfigured or unavailable.
+* **`RoundTwoInterviewRealtime.java`**: WebSocket message handler managing live interview question progression, answer draft synchronization, and turn history.
+* **`RoundTwoQuestionController.java`**: Recruiter controller for managing Round 2 technical subject MCQs and interview prompts (`/api/v1/assessments/{id}/round-two/...`).
+* **`SecurityConfig.java`**: Spring Security filter chain definition, configuring password hashing (BCrypt), JWT filter interceptors, CORS policies, and role authorization rules.

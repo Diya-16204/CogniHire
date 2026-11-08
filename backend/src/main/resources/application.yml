@@ -73,3 +73,14 @@ llm:
 interview:
   kafka-enabled: ${INTERVIEW_KAFKA_ENABLED:false}
   kafka-topic: candidate-interview-answers
+
+
+
+
+#How Spring Boot Reads Both File
+#
+#sapplication.yml is the Base Layer: Spring Boot always loads this file first whenever the app starts up.
+#It provides default values so the backend can run locally on your machine without crashing.
+#
+#application-prod.yml is the Production Layer: This file is only loaded when you tell Spring Boot to run in production mode (by setting the environment variable SPRING_PROFILES_ACTIVE=prod).
+#When prod is active, Spring Boot overlays application-prod.yml on top of application.yml and overwrites matching keys.
