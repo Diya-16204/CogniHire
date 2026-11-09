@@ -50,6 +50,22 @@ class AiAssistanceController {
 
     record InterviewResponse(String message) {
     }
+    //A record in Java (introduced in Java 14+ and finalized in Java 16) is a special type of class designed specifically to act as an immutable data carrier (Data Transfer Object / DTO).
+
+
+//    What Java Automatically Generates for You Under the Hood
+//    When you define a record, Java automatically creates all of the         following in background byte code:
+//
+//    Private final fields for message and sourceCode.
+//
+//    A public canonical constructor matching all defined                     parameters.
+//
+//    Accessor methods (getters): request.message() and request               .sourceCode() (Note: Java records drop the get prefix).
+//
+//    equals() & hashCode(): To compare two instances based on field          values rather than memory addresses.
+//
+//    toString(): Returns a clean string like AssistRequest[message=...,      sourceCode=...].
+
 
     @PostMapping
     @Transactional(noRollbackFor = ResponseStatusException.class)
@@ -103,12 +119,10 @@ class AiAssistanceController {
         if (!auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_CANDIDATE")))
             throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         var candidateId = UUID.fromString(auth.getName());
-        var attempt = attempts.findByIdAndCandidateId(attemptId, candidateId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Interview attempt was not found for the signed-in candidate"));
+        var attempt = attempts.findByIdAndCandidateId(attemptId, candidateId).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Interview attempt was not found for the signed-in candidate"));
         if (!attempt.status.equals("IN_PROGRESS") || attempt.roundTwoStartedAt != null || Instant.now().isAfter(attempt.deadlineAt))
             throw new ResponseStatusException(HttpStatus.CONFLICT, "This assessment is not accepting interview responses");
-        var question = questions.findByIdAndAssessmentId(questionId, attempt.assignment.assessment.id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Interview question was not found in this candidate's assessment"));
+        var question = questions.findByIdAndAssessmentId(questionId, attempt.assignment.assessment.id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Interview question was not found in this candidate's assessment"));
         var transcript = req.transcript() == null ? List.<InterviewTurn>of() : req.transcript();
         var answer = req.answer() == null ? "" : req.answer().trim();
         if (!transcript.isEmpty() && answer.isBlank())
